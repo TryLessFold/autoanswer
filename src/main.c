@@ -1,27 +1,32 @@
+#include <my_pj.h>
 
-#include <pjsua.h>
-#include <pjmedia.h>
-
-#define THIS_FILE "main.c"
-
-#define SIP_DOMAIN "192.168.23.134"
-#define SIP_USER "3302"
-#define SIP_PASSWD ""
-#define MY_MAX_CALLS 20
+/* Display error and exit application */
+void error_exit(const char *title,
+					   pj_status_t status)
+{
+	pjsua_perror(THIS_FILE, title, status);
+	pjsua_destroy();
+	exit(1);
+}
 
 /* Callback called by the library upon receiving incoming call */
-static void on_incoming_call(pjsua_acc_id acc_id, 
-							 pjsua_call_id call_id,
-							 pjsip_rx_data *rdata)
+void on_incoming_call(pjsua_acc_id acc_id, 
+					  pjsua_call_id call_id,
+					  pjsip_rx_data *rdata)
 {
 	pjsua_call_info ci;
-
+	int size_num, status;
 	PJ_UNUSED_ARG(acc_id);
 	PJ_UNUSED_ARG(rdata);
-
 	pjsua_call_get_info(call_id, &ci);
-
-	PJ_LOG(3, (THIS_FILE, "Incoming call from %*s!!",
+	status = get_len_ident(ci.local_info.ptr, ci.local_info.slen, &size_num);
+	if (status != GLI_SUCC){
+		error_exit("Wrong URL", status);
+	}
+	char num[size_num];
+	get_ident(ci.local_info.ptr, ci.local_info.slen, num, &size_num);
+	PJ_LOG(3, (THIS_FILE, "%s Incoming call from %.*s!!",
+			   num,
 			   (int)ci.remote_info.slen,
 			   ci.remote_info.ptr));
 
@@ -30,8 +35,8 @@ static void on_incoming_call(pjsua_acc_id acc_id,
 }
 
 /* Callback called by the library when call's state has changed */
-static void on_call_state(pjsua_call_id call_id, 
-						  pjsip_event *e)
+void on_call_state(pjsua_call_id call_id, 
+				   pjsip_event *e)
 {
 	pjsua_call_info ci;
 
@@ -44,7 +49,7 @@ static void on_call_state(pjsua_call_id call_id,
 }
 
 /* Callback called by the library when call's media state has changed */
-static void on_call_media_state(pjsua_call_id call_id)
+void on_call_media_state(pjsua_call_id call_id)
 {
 	pjsua_call_info ci;
 
@@ -56,15 +61,6 @@ static void on_call_media_state(pjsua_call_id call_id)
 		pjsua_conf_connect(ci.conf_slot, 0);
 		pjsua_conf_connect(0, ci.conf_slot);
 	}
-}
-
-/* Display error and exit application */
-static void error_exit(const char *title,
-					   pj_status_t status)
-{
-	pjsua_perror(THIS_FILE, title, status);
-	pjsua_destroy();
-	exit(1);
 }
 
 /*
@@ -136,6 +132,24 @@ int main(int argc, char *argv[])
 		cfg.cred_info[0].realm = pj_str(SIP_DOMAIN);
 		cfg.cred_info[0].scheme = pj_str("digest");
 		cfg.cred_info[0].username = pj_str(SIP_USER);
+		cfg.cred_info[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
+		cfg.cred_info[0].data = pj_str(SIP_PASSWD);
+
+		status = pjsua_acc_add(&cfg, PJ_FALSE, &acc_id);
+		if (status != PJ_SUCCESS)
+			error_exit("Error adding account", status);
+	}
+
+	{
+		pjsua_acc_config cfg;
+
+		pjsua_acc_config_default(&cfg);
+		cfg.id = pj_str("sip:3300""@" SIP_DOMAIN);
+		cfg.reg_uri = pj_str("sip:" SIP_DOMAIN);
+		cfg.cred_count = 1;
+		cfg.cred_info[0].realm = pj_str(SIP_DOMAIN);
+		cfg.cred_info[0].scheme = pj_str("digest");
+		cfg.cred_info[0].username = pj_str("3300");
 		cfg.cred_info[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
 		cfg.cred_info[0].data = pj_str(SIP_PASSWD);
 

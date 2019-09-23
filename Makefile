@@ -9,7 +9,7 @@ autoanswer: build_o
 	rm *.o
 
 build_o: $(CFILES)
-	$(CC) src/*.c -c -I includes -g
+	$(CC) $(CFILES) -c -I includes -g
 
 clean:
 	rm -rf bin

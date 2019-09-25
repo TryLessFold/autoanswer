@@ -31,7 +31,7 @@ void on_incoming_call(pjsua_acc_id acc_id,
 			   ci.remote_info.ptr));
 
 	/* Automatically answer incoming calls with 200/OK */
-	pjsua_call_answer(call_id, 200, NULL, NULL);
+	//pjsua_call_answer(call_id, 200, NULL, NULL);
 }
 
 /* Callback called by the library when call's state has changed */
@@ -122,34 +122,20 @@ int main(int argc, char *argv[])
 		error_exit("Error starting pjsua", status);
 
 	/* Register to SIP server by creating SIP account. */
+	for (int i = atoi(SIP_USER); i < (atoi(SIP_USER) + VALUE_DOMAINS); i++)
 	{
 		pjsua_acc_config cfg;
-
+		char sip_usr[32];
+		char sip_url[64];
+		snprintf(sip_usr, 32, "%d", i);
+		snprintf(sip_url, 64, "sip:%s@%s", sip_usr, SIP_DOMAIN);
 		pjsua_acc_config_default(&cfg);
-		cfg.id = pj_str("sip:" SIP_USER "@" SIP_DOMAIN);
+		cfg.id = pj_str(sip_url);
 		cfg.reg_uri = pj_str("sip:" SIP_DOMAIN);
 		cfg.cred_count = 1;
 		cfg.cred_info[0].realm = pj_str(SIP_DOMAIN);
 		cfg.cred_info[0].scheme = pj_str("digest");
-		cfg.cred_info[0].username = pj_str(SIP_USER);
-		cfg.cred_info[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
-		cfg.cred_info[0].data = pj_str(SIP_PASSWD);
-
-		status = pjsua_acc_add(&cfg, PJ_FALSE, &acc_id);
-		if (status != PJ_SUCCESS)
-			error_exit("Error adding account", status);
-	}
-
-	{
-		pjsua_acc_config cfg;
-
-		pjsua_acc_config_default(&cfg);
-		cfg.id = pj_str("sip:3300""@" SIP_DOMAIN);
-		cfg.reg_uri = pj_str("sip:" SIP_DOMAIN);
-		cfg.cred_count = 1;
-		cfg.cred_info[0].realm = pj_str(SIP_DOMAIN);
-		cfg.cred_info[0].scheme = pj_str("digest");
-		cfg.cred_info[0].username = pj_str("3300");
+		cfg.cred_info[0].username = pj_str(sip_usr);
 		cfg.cred_info[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
 		cfg.cred_info[0].data = pj_str(SIP_PASSWD);
 

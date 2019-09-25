@@ -9,8 +9,9 @@
 #define THIS_FILE "main.c"
 
 #define SIP_DOMAIN "192.168.23.134"
-#define SIP_USER "3302"
+#define SIP_USER "3300"
 #define SIP_PASSWD ""
+#define VALUE_DOMAINS 3
 #define MY_MAX_CALLS 20
 
 #endif //__MY_PJ__

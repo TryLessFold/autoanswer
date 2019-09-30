@@ -16,3 +16,4 @@ clean:
 
 prepare:
 	mkdir bin
+	cp sounds/*.wav bin/

@@ -7,10 +7,13 @@ int get_len_ident(char url[], int len_url, int *len_ident)
         return -1;
     for (int i = 0; i < len_url; i++)
     {
-        if (url[i] == ':') {
-            while (url[i]!='@') {
+        if (url[i] == ':')
+        {
+            while (url[i] != '@')
+            {
                 i++;
-                if (i >= len_url){
+                if (i >= len_url)
+                {
                     return -1;
                 }
                 (*len_ident)++;

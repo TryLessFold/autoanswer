@@ -1,15 +1,103 @@
 #include <my_pj.h>
 
-pjsua_conf_port_id ringback_slot;
-pjsua_player_id player_slot;
+pj_mutex_t *mtx;
+pj_pool_t *pool_mtx;
 
-/* Display error and exit application */
-void error_exit(const char *title,
-				pj_status_t status)
+pjsua_conf_port_id ringback_slot;
+pjsua_player_id player_ids[MY_MAX_CALLS];
+pjsua_conf_port_id  answer_RBT_slot;
+pjsua_conf_port_id  answer_continuous_slot;
+
+/* Adding ports for conference: ringback, players and sounds */
+void init_sounds(pj_pool_t *pool,
+				pjsua_media_config media_cfg)
 {
-	pjsua_perror(THIS_FILE, title, status);
-	pjsua_destroy();
-	exit(1);
+	pj_status_t status;
+	pjmedia_tone_desc tone[1];
+
+	/* Adding ringback tone */
+	pj_bzero(&tone, sizeof(tone));
+	for (int i = 0; i < RINGBACK_CNT; ++i)
+	{
+		tone[i].freq1 = RINGBACK_FREQ1;
+		tone[i].freq2 = RINGBACK_FREQ2;
+		tone[i].on_msec = RINGBACK_ON;
+		tone[i].off_msec = RINGBACK_OFF;
+	}
+	status = add_tone("ringback", pool, media_cfg, &ringback_slot, tone);
+	if (status != PJ_SUCCESS)
+	{
+		error_exit("Doesn't able add tone", status);
+	}
+	
+	/* Adding continuous tone */
+	pj_bzero(&tone, sizeof(tone));
+	for (int i = 0; i < CONTINUOUS_CNT; ++i)
+	{
+		tone[i].freq1 = CONTINUOUS_FREQ1;
+		tone[i].freq2 = CONTINUOUS_FREQ2;
+		tone[i].on_msec = CONTINUOUS_ON;
+		tone[i].off_msec = CONTINUOUS_OFF;
+	}
+	status = add_tone("continuous", pool, media_cfg, &answer_continuous_slot, tone);
+	if (status != PJ_SUCCESS)
+	{
+		error_exit("Doesn't able add tone", status);
+	}
+	
+	/* Adding RBT*/
+	pj_bzero(&tone, sizeof(tone));
+	for (int i = 0; i < RB_RUS_CNT; ++i)
+	{
+		tone[i].freq1 = RB_RUS_FREQ1;
+		tone[i].freq2 = RB_RUS_FREQ2;
+		tone[i].on_msec = RB_RUS_ON;
+		tone[i].off_msec = RB_RUS_OFF;
+	}
+	status = add_tone("RBT", pool, media_cfg, &answer_RBT_slot, tone);
+	if (status != PJ_SUCCESS)
+	{
+		error_exit("Doesn't able add tone", status);
+	}
+	
+	/* Add players for 20 possible callers */
+	for (int i = 0; i < MY_MAX_CALLS; i++) {
+		const pj_str_t wav_sound = pj_str(WAV_NAME);
+		status = pjsua_player_create(&wav_sound , PJMEDIA_FILE_NO_LOOP, &player_ids[i]);
+		if (status != PJ_SUCCESS)
+		{
+			error_exit("Player didn't be created", status);
+		}
+	}
+}
+
+pj_thread_proc *call_acceptance(void *arg)
+{
+	pjsua_call_info call_info;
+	memcpy(&call_info, arg, sizeof(pjsua_call_info));
+	//pj_mutex_unlock(mtx);
+	int status;
+	const int sip_user = atoi(SIP_USER);
+	pjsua_conf_connect(ringback_slot, call_info.conf_slot);
+	pj_thread_sleep(5000);
+	pjsua_conf_disconnect(ringback_slot, call_info.conf_slot);
+	char ident[12];
+	int i_ident, size_ident;
+	size_ident = sizeof(ident);
+	get_ident(call_info.local_info.ptr, call_info.local_info.slen, ident, &size_ident);
+	i_ident = atoi(ident);
+	if (sip_user == i_ident)
+	{
+		pjsua_conf_connect(answer_continuous_slot, call_info.conf_slot);
+	}
+	else if (sip_user == (i_ident+1))
+	{
+		pjsua_conf_connect(pjsua_player_get_conf_port(player_ids[call_info.id]), call_info.conf_slot);
+	}
+	else
+	{
+		pjsua_conf_connect(answer_RBT_slot, call_info.conf_slot);
+	}
 }
 
 /* Callback called by the library upon receiving incoming call */
@@ -55,47 +143,46 @@ void on_call_state(pjsua_call_id call_id,
 /* Callback called by the library when call's media state has changed */
 void on_call_media_state(pjsua_call_id call_id)
 {
-	pjsua_call_info ci;
-
-	pjsua_call_get_info(call_id, &ci);
-
-	if (ci.media_status == PJSUA_CALL_MEDIA_ACTIVE)
+	pjsua_call_info call_info;
+	pj_pool_t *tmp_pool;
+	pj_thread_t *ptr;
+	pj_status_t status;
+	tmp_pool = pjsua_pool_create("threads_pool", 1000, 1000);
+	//pj_mutex_lock(mtx);
+	pjsua_call_get_info(call_id, &call_info);
+	PJ_LOG(3, (THIS_FILE, "Call_media %d state=%.*s", call_id,
+			   (int)call_info.state_text.slen,
+			   call_info.state_text.ptr));
+	if (call_info.media_status == PJSUA_CALL_MEDIA_ACTIVE)
 	{
-		// When media is active, connect call to sound device.
-		pjsua_conf_connect(pjsua_player_get_conf_port(player_slot), ci.conf_slot);
-		//pjsua_conf_connect(0, ringback_slot);
+		status = pj_thread_create(tmp_pool, "call_acceptance", (pj_thread_proc *) &call_acceptance,
+						 &call_info, PJ_THREAD_DEFAULT_STACK_SIZE, 0, &ptr);
+	//	pj_mutex_lock(mtx);
+	//	pj_mutex_unlock(mtx);
+		//pjsua_conf_connect(/*pjsua_player_get_conf_port(player_ids[ci.id])*/ answer_continuous_slot, call_info.conf_slot);
 	}
+	PJ_LOG(3, (THIS_FILE, "Exit MMM"));
 }
+
 
 /*
   * main()
   *
   * argv[1] may contain URL to call.
   */
-int main(int argc, char *argv[])
+int main()
 {
 	pjsua_acc_id acc_id;
 	pj_status_t status;
 	pjsua_config cfg;
 	pjsua_logging_config log_cfg;
 	pjsua_media_config media_cfg;
-	pjmedia_port *ringback_port;
-	//	pjmedia_snd_port_param snd_cfg;
-	//	pjmedia_snd_port *snd_port;
 	pj_pool_t *pool;
 
 	/* Create pjsua first! */
 	status = pjsua_create();
 	if (status != PJ_SUCCESS)
 		error_exit("Error in pjsua_create()", status);
-
-	/* If argument is specified, it's got to be a valid SIP URL */
-	if (argc > 1)
-	{
-		status = pjsua_verify_url(argv[1]);
-		if (status != PJ_SUCCESS)
-			error_exit("Invalid URL in argv", status);
-	}
 
 	/* Init pjsua */
 	pjsua_config_default(&cfg);
@@ -125,49 +212,9 @@ int main(int argc, char *argv[])
 	}
 
 	pool = pjsua_pool_create("tonegen", 1000, 1000);
-
-	//	pjmedia_snd_port_param_default(&snd_cfg);
-	//	status = pjmedia_snd_port_create(pool, -1, -1, 8000, 1, 160, 16, 0, &snd_port);
-	//	if (status != PJ_SUCCESS) {
-	//		error_exit("Sound port didn't be created", status);
-	//	}
-	unsigned samples_per_frame;
-	pjmedia_tone_desc tone[1];
-	pj_str_t name;
-	samples_per_frame = media_cfg.audio_frame_ptime *
-						media_cfg.clock_rate *
-						media_cfg.channel_count / 1000;
-	/* Ringback tone (call is ringing) */
-	name = pj_str("ringback");
-	status = pjmedia_tonegen_create2(pool, &name,
-									 media_cfg.clock_rate,
-									 media_cfg.channel_count,
-									 samples_per_frame,
-									 16, PJMEDIA_TONEGEN_LOOP,
-									 &ringback_port);
-	if (status != PJ_SUCCESS)
-		error_exit("Create tone error", status);
-	pj_bzero(&tone, sizeof(tone));
-	for (int i = 0; i < RINGBACK_CNT; ++i)
-	{
-		tone[i].freq1 = RINGBACK_FREQ1;
-		tone[i].freq2 = RINGBACK_FREQ2;
-		tone[i].on_msec = RINGBACK_ON;
-		tone[i].off_msec = RINGBACK_OFF;
-	}
-	tone[1 - 1].off_msec = RINGBACK_INTERVAL;
-	pjmedia_tonegen_play(ringback_port, 1, tone,
-						 PJMEDIA_TONEGEN_LOOP);
-	status = pjsua_conf_add_port(pool, ringback_port,
-								 &ringback_slot);
-	if (status != PJ_SUCCESS)
-		error_exit("Conf add error", status);
-	const pj_str_t lala = pj_str("audio.wav");
-	status = pjsua_player_create(&lala , PJMEDIA_FILE_NO_LOOP, &player_slot);
-	if (status != PJ_SUCCESS)
-	{
-		error_exit("Player didn't be created", status);
-	}
+	init_sounds(pool, media_cfg);
+	pool_mtx = pjsua_pool_create("pool_mtx", sizeof(pj_mutex_t *), 2);
+	pj_mutex_create(pool_mtx, "mtx", PJ_MUTEX_DEFAULT, &mtx);
 	//---------------------------------------------------------------------------------
 	/* Initialization is done, now start pjsua */
 	status = pjsua_start();
@@ -197,15 +244,6 @@ int main(int argc, char *argv[])
 			error_exit("Error adding account", status);
 	}
 
-	/* If URL is specified, make call to the URL. */
-	if (argc > 1)
-	{
-		pj_str_t uri = pj_str(argv[1]);
-		status = pjsua_call_make_call(acc_id, &uri, 0, NULL, NULL, NULL);
-		if (status != PJ_SUCCESS)
-			error_exit("Error making call", status);
-	}
-
 	/* Wait until user press "q" to quit. */
 	for (;;)
 	{
@@ -226,6 +264,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* Destroy pjsua */
+	pj_pool_release(pool);
 	pjsua_destroy();
 
 	return 0;

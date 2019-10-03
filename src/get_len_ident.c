@@ -1,18 +1,20 @@
 #include <get_len_ident.h>
 
-int get_len_ident(char url[], int len_url, int *len_ident)
+int get_len_ident(char uri[],
+                int len_uri,
+                int *len_ident)
 {
     (*len_ident) = 0;
-    if (len_url <= 1)
+    if (len_uri <= 1)
         return -1;
-    for (int i = 0; i < len_url; i++)
+    for (int i = 0; i < len_uri; i++)
     {
-        if (url[i] == ':')
+        if (uri[i] == ':')
         {
-            while (url[i] != '@')
+            while (uri[i] != '@')
             {
                 i++;
-                if (i >= len_url)
+                if (i >= len_uri)
                 {
                     return -1;
                 }

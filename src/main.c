@@ -1,13 +1,14 @@
 #include <my_pj.h>
 
-static pjsua_call_info tmp_call_info[MY_MAX_CALLS];
+static pjsua_call_id call_ids[MY_MAX_CALLS];
 
 static pj_timer_entry entry_timers[MY_MAX_CALLS];
+static char timer_flag[MY_MAX_CALLS] = {0};
 
 pjsua_conf_port_id ringback_slot;
 pjsua_player_id player_ids[MY_MAX_CALLS];
-pjsua_conf_port_id  answer_RBT_slot;
-pjsua_conf_port_id  answer_continuous_slot;
+pjsua_conf_port_id answer_RBT_slot;
+pjsua_conf_port_id answer_continuous_slot;
 
 static pj_status_t on_playfile_done(pjmedia_port *port, void *usr_data)
 {
@@ -15,26 +16,37 @@ static pj_status_t on_playfile_done(pjmedia_port *port, void *usr_data)
 	int id = *(int *)usr_data;
 
 	PJ_UNUSED_ARG(port);
-    PJ_UNUSED_ARG(usr_data);
+	PJ_UNUSED_ARG(usr_data);
 
-    /* Just rewind WAV when it is played outside of call */
-    if (pjsua_call_get_count() == 0) {
+	/* Just rewind WAV when it is played outside of call */
+	if (pjsua_call_get_count() == 0)
+	{
 		pjsua_player_set_pos(player_ids[id], 0);
 		return PJ_SUCCESS;
-    }
-
-    delay.sec = 0;
-    delay.msec = 200; /* Give 200 ms before hangup */
-    pjsip_endpt_schedule_timer(pjsua_get_pjsip_endpt(), 
-			       &entry_timers[id], 
-			       &delay);
-
-    return PJ_SUCCESS;
+	}
+	switch(timer_flag[id])
+	{
+		case TIMER_STATE_END_WAV:
+			return PJ_SUCCESS;
+		case TIMER_STATE_GLOBAL:
+			pjsip_endpt_cancel_timer(pjsua_get_pjsip_endpt(), &entry_timers[id]);
+		case TIMER_STATE_UNABLE:
+			PJ_LOG(3, (THIS_FILE, "!!! Start"));
+			delay.sec = 0;
+			delay.msec = 200; /* Give 200 ms before hangup */
+			pjsip_endpt_schedule_timer(pjsua_get_pjsip_endpt(),
+									   &entry_timers[id],
+									   &delay);
+			timer_flag[id] = TIMER_STATE_END_WAV;
+		default:
+			pjsua_perror(THIS_FILE, "Undefined timer flag", -1);
+	}
+	return PJ_SUCCESS;
 }
 
 /* Adding ports for conference: ringback, players and sounds */
 void init_sounds(pj_pool_t *pool,
-				pjsua_media_config media_cfg)
+				 pjsua_media_config media_cfg)
 {
 	pj_status_t status;
 	pjmedia_port *media_port;
@@ -54,7 +66,7 @@ void init_sounds(pj_pool_t *pool,
 	{
 		error_exit("Doesn't able add tone", status);
 	}
-	
+
 	/* Adding continuous tone */
 	pj_bzero(&tone, sizeof(tone));
 	for (int i = 0; i < CONTINUOUS_CNT; ++i)
@@ -69,7 +81,7 @@ void init_sounds(pj_pool_t *pool,
 	{
 		error_exit("Doesn't able add tone", status);
 	}
-	
+
 	/* Adding RBT*/
 	pj_bzero(&tone, sizeof(tone));
 	for (int i = 0; i < RB_RUS_CNT; ++i)
@@ -84,21 +96,19 @@ void init_sounds(pj_pool_t *pool,
 	{
 		error_exit("Doesn't able add tone", status);
 	}
-	
+
 	/* Add players for 20 possible callers */
 	const pj_str_t wav_sound = pj_str(WAV_NAME);
-	static int tmp_i[MY_MAX_CALLS];
 	for (int i = 0; i < MY_MAX_CALLS; i++)
 	{
-		status = pjsua_player_create(&wav_sound , PJMEDIA_FILE_NO_LOOP, &player_ids[i]);
+		status = pjsua_player_create(&wav_sound, PJMEDIA_FILE_NO_LOOP, &player_ids[i]);
 		if (status != PJ_SUCCESS)
 		{
 			error_exit("Player didn't be created", status);
 		}
 		pjsua_player_get_port(player_ids[i], &media_port);
-		pjsua_call_get_info(i, &tmp_call_info[i]);
-		tmp_i[i] = i;
-		status = pjmedia_wav_player_set_eof_cb(media_port, (void *) &tmp_i[i], &on_playfile_done);
+		call_ids[i] = i;
+		status = pjmedia_wav_player_set_eof_cb(media_port, (void *)&call_ids[i], &on_playfile_done);
 		if (status != PJ_SUCCESS)
 		{
 			error_exit("Can't set player eof trigger", status);
@@ -108,30 +118,38 @@ void init_sounds(pj_pool_t *pool,
 
 pj_thread_proc *call_acceptance(void *arg)
 {
+	pjsua_call_id call_id;
 	pjsua_call_info call_info;
-	//memcpy(&call_info, arg, sizeof(pjsua_call_info));
-	call_info = *(pjsua_call_info *) arg;
 	int status;
 	const int sip_user = atoi(SIP_USER);
+	call_id = *(int *)arg;
+	pjsua_call_get_info(call_id, &call_info);
 	pjsua_conf_connect(ringback_slot, call_info.conf_slot);
 	pj_thread_sleep(5000);
-	pjsua_conf_disconnect(ringback_slot, call_info.conf_slot);
-	char ident[12];
-	int i_ident, size_ident;
-	size_ident = sizeof(ident);
-	get_ident(call_info.local_info.ptr, call_info.local_info.slen, ident, &size_ident);
-	i_ident = atoi(ident);
-	if (sip_user == i_ident)
+	pjsua_call_get_info(call_id, &call_info);
+	PJ_LOG(3, (THIS_FILE, "!!! Call %d state=%.*s", call_info.id,
+				   (int)call_info.state_text.slen,
+				   call_info.state_text.ptr));
+	if (call_info.state == PJSIP_INV_STATE_CONFIRMED)
 	{
-		pjsua_conf_connect(answer_continuous_slot, call_info.conf_slot);
-	}
-	else if (sip_user+1 == i_ident)
-	{
-		pjsua_conf_connect(pjsua_player_get_conf_port(player_ids[call_info.id]), call_info.conf_slot);
-	}
-	else
-	{
-		pjsua_conf_connect(answer_RBT_slot, call_info.conf_slot);
+		pjsua_conf_disconnect(ringback_slot, call_info.conf_slot);
+		char ident[12];
+		int i_ident, size_ident;
+		size_ident = sizeof(ident);
+		get_ident(call_info.local_info.ptr, call_info.local_info.slen, ident, &size_ident);
+		i_ident = atoi(ident);
+		if (sip_user == i_ident)
+		{
+			pjsua_conf_connect(answer_continuous_slot, call_info.conf_slot);
+		}
+		else if (sip_user + 1 == i_ident)
+		{
+			pjsua_conf_connect(pjsua_player_get_conf_port(player_ids[call_info.id]), call_info.conf_slot);
+		}
+		else
+		{
+			pjsua_conf_connect(answer_RBT_slot, call_info.conf_slot);
+		}
 	}
 }
 
@@ -146,8 +164,8 @@ static void hangup_timeout_callback(pj_timer_heap_t *timer_heap,
 
 /* Callback called by the library upon receiving incoming call */
 static void on_incoming_call(pjsua_acc_id acc_id,
-					  pjsua_call_id call_id,
-					  pjsip_rx_data *rdata)
+							 pjsua_call_id call_id,
+							 pjsip_rx_data *rdata)
 {
 	pjsua_call_info ci;
 	int size_num, status;
@@ -172,7 +190,7 @@ static void on_incoming_call(pjsua_acc_id acc_id,
 
 /* Callback called by the library when call's state has changed */
 static void on_call_state(pjsua_call_id call_id,
-				   pjsip_event *e)
+						  pjsip_event *e)
 {
 	pjsua_call_info ci;
 
@@ -186,17 +204,17 @@ static void on_call_state(pjsua_call_id call_id,
 	{
 		pjsua_player_set_pos(player_ids[call_id], 0);
 		pjsip_endpt_cancel_timer(pjsua_get_pjsip_endpt(), &entry_timers[call_id]);
-
+		timer_flag[call_id] = TIMER_STATE_UNABLE;
 	}
-	if (ci.state == PJSIP_INV_STATE_CONFIRMED) 
+	if (ci.state == PJSIP_INV_STATE_CONFIRMED)
 	{
-	    /* Schedule timer to hangup call after the specified duration */
-	    pj_time_val delay;
-	    delay.sec = CALL_DURATION;
-	    delay.msec = 0;
-	    pjsip_endpt_schedule_timer(pjsua_get_pjsip_endpt(), &entry_timers[call_id], &delay);
+		/* Schedule timer to hangup call after the specified duration */
+		pj_time_val delay;
+		delay.sec = CALL_DURATION;
+		delay.msec = 0;
+		pjsip_endpt_schedule_timer(pjsua_get_pjsip_endpt(), &entry_timers[call_id], &delay);
+		timer_flag[call_id] = TIMER_STATE_GLOBAL;
 	}
-
 }
 
 /* Callback called by the library when call's media state has changed */
@@ -205,15 +223,16 @@ static void on_call_media_state(pjsua_call_id call_id)
 	pj_pool_t *tmp_pool;
 	pj_thread_t *ptr;
 	pj_status_t status;
+	pjsua_call_info call_info;
 	tmp_pool = pjsua_pool_create("threads_pool", sizeof(call_acceptance), 2);
-	pjsua_call_get_info(call_id, &tmp_call_info[call_id]);
+	pjsua_call_get_info(call_id, &call_info);
 	PJ_LOG(3, (THIS_FILE, "Call_media %d state=%.*s", call_id,
-			   (int)tmp_call_info[call_id].state_text.slen,
-			   tmp_call_info[call_id].state_text.ptr));
-	if (tmp_call_info[call_id].media_status == PJSUA_CALL_MEDIA_ACTIVE)
+			   (int)call_info.state_text.slen,
+			   call_info.state_text.ptr));
+	if (call_info.media_status == PJSUA_CALL_MEDIA_ACTIVE)
 	{
-		status = pj_thread_create(tmp_pool, "call_acceptance", (pj_thread_proc *) &call_acceptance,
-						 &tmp_call_info[call_id], PJ_THREAD_DEFAULT_STACK_SIZE, 0, &ptr);
+		status = pj_thread_create(tmp_pool, "call_acceptance", (pj_thread_proc *)&call_acceptance,
+								  &call_ids[call_id], PJ_THREAD_DEFAULT_STACK_SIZE, 0, &ptr);
 	}
 	PJ_LOG(3, (THIS_FILE, "Exit MMM"));
 }
@@ -265,13 +284,15 @@ int main()
 	}
 	/* Init sounds */
 	pool = pjsua_pool_create("tonegen", 1000, 1000);
-	init_sounds(pool, media_cfg);
+	
 
 	/* Add timers */
 	for (int i = 0; i < MY_MAX_CALLS; i++)
 	{
+		call_ids[i] = i;
 		pj_timer_entry_init(&entry_timers[i], i, NULL, &hangup_timeout_callback);
 	}
+	init_sounds(pool, media_cfg);
 	//---------------------------------------------------------------------------------
 	/* Initialization is done, now start pjsua */
 	status = pjsua_start();

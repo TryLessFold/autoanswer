@@ -40,6 +40,10 @@
 
 #define CALL_DURATION 300
 
+#define TIMER_STATE_END_WAV 2
+#define TIMER_STATE_GLOBAL 1
+#define TIMER_STATE_UNABLE 0
+
 extern pjsua_conf_port_id ringback_slot;
 extern pjsua_player_id player_id[];
 extern pjsua_conf_port_id answer_RBT_slot;

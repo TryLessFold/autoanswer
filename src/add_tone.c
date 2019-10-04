@@ -1,6 +1,6 @@
 #include <add_tone.h>
 
-int add_tone(char *tone_name,
+pj_status_t add_tone(char *tone_name,
             pj_pool_t *pool,
             pjsua_media_config media_cfg,
             pjsua_conf_port_id *ringback_slot,

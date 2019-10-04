@@ -38,6 +38,8 @@
 
 #define WAV_NAME "audio.wav"
 
+#define CALL_DURATION 300
+
 extern pjsua_conf_port_id ringback_slot;
 extern pjsua_player_id player_id[];
 extern pjsua_conf_port_id answer_RBT_slot;

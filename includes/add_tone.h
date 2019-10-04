@@ -7,10 +7,9 @@
 
 /*
  * This function creates tone slot for conference to ringback_slot.
- * Returns pjlib's status.
  */
 
-int add_tone(char* tone_name,
+pj_status_t add_tone(char* tone_name,
             pj_pool_t *pool,
             pjsua_media_config media_cfg,
             pjsua_conf_port_id *ringback_slot,

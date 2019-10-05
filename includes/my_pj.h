@@ -36,9 +36,9 @@
 #define RB_RUS_OFF 4000 
 #define RB_RUS_CNT 1 
 
-#define WAV_NAME "audio.wav"
+#define WAV_NAME "audio2.wav"
 
-#define CALL_DURATION 300
+#define CALL_DURATION 30
 
 #define TIMER_STATE_END_WAV 2
 #define TIMER_STATE_GLOBAL 1

@@ -9,6 +9,7 @@ pjsua_conf_port_id ringback_slot;
 pjsua_player_id player_ids[MY_MAX_CALLS];
 pjsua_conf_port_id answer_RBT_slot;
 pjsua_conf_port_id answer_continuous_slot;
+pj_pool_t *pool;
 
 static pj_status_t on_playfile_done(pjmedia_port *port, void *usr_data)
 {
@@ -38,6 +39,7 @@ static pj_status_t on_playfile_done(pjmedia_port *port, void *usr_data)
 									   &entry_timers[id],
 									   &delay);
 			timer_flag[id] = TIMER_STATE_END_WAV;
+			break;
 		default:
 			pjsua_perror(THIS_FILE, "Undefined timer flag", -1);
 	}
@@ -220,18 +222,16 @@ static void on_call_state(pjsua_call_id call_id,
 /* Callback called by the library when call's media state has changed */
 static void on_call_media_state(pjsua_call_id call_id)
 {
-	pj_pool_t *tmp_pool;
 	pj_thread_t *ptr;
 	pj_status_t status;
 	pjsua_call_info call_info;
-	tmp_pool = pjsua_pool_create("threads_pool", sizeof(call_acceptance), 2);
 	pjsua_call_get_info(call_id, &call_info);
 	PJ_LOG(3, (THIS_FILE, "Call_media %d state=%.*s", call_id,
 			   (int)call_info.state_text.slen,
 			   call_info.state_text.ptr));
 	if (call_info.media_status == PJSUA_CALL_MEDIA_ACTIVE)
 	{
-		status = pj_thread_create(tmp_pool, "call_acceptance", (pj_thread_proc *)&call_acceptance,
+		status = pj_thread_create(pool, "call_acceptance", (pj_thread_proc *)&call_acceptance,
 								  &call_ids[call_id], PJ_THREAD_DEFAULT_STACK_SIZE, 0, &ptr);
 	}
 	PJ_LOG(3, (THIS_FILE, "Exit MMM"));
@@ -249,7 +249,6 @@ int main()
 	pjsua_config cfg;
 	pjsua_logging_config log_cfg;
 	pjsua_media_config media_cfg;
-	pj_pool_t *pool;
 
 	/* Create pjsua first! */
 	status = pjsua_create();
@@ -283,7 +282,7 @@ int main()
 			error_exit("Error creating transport", status);
 	}
 	/* Init sounds */
-	pool = pjsua_pool_create("tonegen", 1000, 1000);
+	pool = pjsua_pool_create("my_pj", 1000, 1000);
 	
 
 	/* Add timers */
